@@ -1,0 +1,13 @@
+; Geronimo external gunstock calibration tool
+config_version=5
+
+[application]
+
+config/name="Geronimo Calibration Tool"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.6")
+
+[xr]
+
+openxr/enabled=true
+shaders/enabled=true
