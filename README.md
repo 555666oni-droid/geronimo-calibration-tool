@@ -38,6 +38,11 @@ backup if it happens).
 
 ## Controls
 
+**Left-handed players:** fully supported with zero setup — the tool reads `bLeftHandedMode`
+from the game's own settings and mirrors itself (rifle on the left controller, all
+controls swap hands). Set handedness in Geronimo first, then calibrate. The table
+below reads as right-handed.
+
 | Input | Action |
 |---|---|
 | LEFT stick | Up/Down + Left/Right |

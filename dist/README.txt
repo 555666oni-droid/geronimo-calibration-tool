@@ -46,7 +46,16 @@ TIP: numbers are a property of your STOCK + CONTROLLER TYPE, not your body. If
 someone with the same stock and controllers shares their calibration section, you
 can paste it into your INI (game closed) and skip calibrating entirely.
 
-CONTROLS
+LEFT-HANDED PLAYERS
+-------------------
+Fully supported, zero setup: the tool reads bLeftHandedMode from the game's own
+settings and mirrors itself automatically. If you play lefty in Geronimo, the
+rifle attaches to your LEFT controller and every control below swaps hands
+(read "RIGHT" as your pistol-grip hand, "LEFT" as your support hand). A
+"LEFT-HANDED MODE" banner shows on startup when active. Set your handedness
+in Geronimo first, then calibrate here.
+
+CONTROLS  (as right-handed; mirrored automatically for lefties)
 --------
   LEFT stick   : Up/Down + Left/Right
   RIGHT stick  : Forward/Back + Pitch

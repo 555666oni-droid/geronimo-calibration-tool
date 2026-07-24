@@ -52,6 +52,12 @@ const PITCH_SIGN := 1.0       # flip to -1.0 if pitch direction mismatches Geron
 var xr: XRInterface
 var left: XRController3D
 var right: XRController3D
+# role-based aliases: the tool mirrors automatically for left-handed players by
+# reading bLeftHandedMode from the game's own INI. "primary" = pistol-grip hand
+# (carries the rifle), "offhand" = support hand (panel, up/LR stick, restore).
+var left_handed := false
+var primary: XRController3D
+var offhand: XRController3D
 var rifle: Node3D
 var hud: Label3D
 var board_status: Label3D
@@ -143,6 +149,7 @@ var ghost_line: MeshInstance3D
 
 
 func _ready() -> void:
+	_read_left_handed()
 	_build_environment()
 	_build_xr_rig()
 	_build_rifle()
@@ -184,12 +191,15 @@ func _build_xr_rig() -> void:
 	left = XRController3D.new()
 	left.tracker = "left_hand"
 	origin.add_child(left)
-	left.button_pressed.connect(_on_left_button)
+	left.button_pressed.connect(func(n: String): _on_button(true, n))
 
 	right = XRController3D.new()
 	right.tracker = "right_hand"
 	origin.add_child(right)
-	right.button_pressed.connect(_on_right_button)
+	right.button_pressed.connect(func(n: String): _on_button(false, n))
+
+	primary = left if left_handed else right
+	offhand = right if left_handed else left
 
 	for c in [left, right]:
 		var m := MeshInstance3D.new()
@@ -276,7 +286,7 @@ BOTH TRIGGERS = SAVE to Geronimo INI"
 # ---------------------------------------------------------------- rifle model
 func _build_rifle() -> void:
 	rifle = Node3D.new()
-	right.add_child(rifle)
+	primary.add_child(rifle)
 
 	var dark := Color(0.13, 0.13, 0.14)
 	var mid := Color(0.2, 0.2, 0.22)
@@ -538,7 +548,9 @@ func _build_hud() -> void:
 	hud.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	hud.no_depth_test = true
 	hud.position = Vector3(0.0, 0.09, 0.02)
-	left.add_child(hud)
+	offhand.add_child(hud)
+	if left_handed:
+		_flash("LEFT-HANDED MODE (from game settings)", 4.0, Color(0.4, 0.7, 1.0))
 
 
 # ---------------------------------------------------------------- INI handling
@@ -820,10 +832,10 @@ func _two_hand_capture() -> void:
 	# (b) puts the rifle's foregrip point exactly on your front controller — so
 	# the in-game grab dot is reachable AND gripping the foregrip causes no jump
 	# (the two-hand solve becomes a no-op).
-	if offsets.is_empty() or left == null or not left.get_is_active():
+	if offsets.is_empty() or offhand == null or not offhand.get_is_active():
 		_flash("OFF-HAND NOT TRACKED - capture aborted", 3.0, Color(1.0, 0.25, 0.2))
 		return
-	var f_local: Vector3 = right.to_local(left.global_position)   # front hand in controller space
+	var f_local: Vector3 = primary.to_local(offhand.global_position)   # front hand in controller space
 	if f_local.length() < 0.15 or f_local.length() > 1.0:
 		_flash("HANDS NOT ON STOCK? - capture aborted", 3.0, Color(1.0, 0.25, 0.2))
 		return
@@ -864,7 +876,24 @@ func _save_base_pose() -> void:
 
 
 # ---------------------------------------------------------------- input
-func _on_right_button(bname: String) -> void:
+func _read_left_handed() -> void:
+	var lad := OS.get_environment("LOCALAPPDATA")
+	if lad == "":
+		return
+	var p := lad.replace("\\", "/") + "/" + INI_REL
+	if FileAccess.file_exists(p):
+		left_handed = FileAccess.get_file_as_string(p).contains("bLeftHandedMode=True")
+
+
+func _on_button(is_left: bool, bname: String) -> void:
+	# route physical controller -> hand role (mirrored in left-handed mode)
+	if is_left == left_handed:
+		_on_primary_button(bname)
+	else:
+		_on_offhand_button(bname)
+
+
+func _on_primary_button(bname: String) -> void:
 	if restore_mode:
 		if bname == "ax_button":
 			_do_restore()
@@ -885,7 +914,7 @@ func _on_right_button(bname: String) -> void:
 			_flash(lst[optic_choice[cur]]["name"], 1.5, Color(0.4, 0.7, 1.0))
 
 
-func _on_left_button(bname: String) -> void:
+func _on_offhand_button(bname: String) -> void:
 	if bname == "primary_click":
 		restore_mode = not restore_mode
 		if restore_mode:
@@ -936,30 +965,30 @@ func _process(delta: float) -> void:
 	var speed := 1.0
 	if left.get_float("grip") > 0.5 or right.get_float("grip") > 0.5:
 		speed = FINE
-	var ls := _stick(left)
-	var rs := _stick(right)
+	var offs := _stick(offhand)
+	var prs := _stick(primary)
 
 	if restore_mode:
 		nav_cd -= delta
-		if absf(ls.y) > 0.6 and nav_cd <= 0.0:
-			restore_sel = clampi(restore_sel + (1 if ls.y < 0.0 else -1), 0, backup_files.size() - 1)
+		if absf(offs.y) > 0.6 and nav_cd <= 0.0:
+			restore_sel = clampi(restore_sel + (1 if offs.y < 0.0 else -1), 0, backup_files.size() - 1)
 			nav_cd = 0.25
 		_update_hud()
 		return
 
 	if mode == 1:
-		base_pos.x += ls.x * MOVE_CMPS * 0.01 * speed * delta
-		base_pos.y += ls.y * MOVE_CMPS * 0.01 * speed * delta
-		base_pos.z += -rs.y * MOVE_CMPS * 0.01 * speed * delta
-		base_pitch += rs.x * PITCH_DPS * speed * delta
+		base_pos.x += offs.x * MOVE_CMPS * 0.01 * speed * delta
+		base_pos.y += offs.y * MOVE_CMPS * 0.01 * speed * delta
+		base_pos.z += -prs.y * MOVE_CMPS * 0.01 * speed * delta
+		base_pitch += prs.x * PITCH_DPS * speed * delta
 	elif mode == 2:
 		pass                                   # capture mode: sticks disabled
 	elif not offsets.is_empty():
 		var o: Dictionary = offsets[cur]
-		o["lr"] += ls.x * MOVE_CMPS * speed * delta
-		o["up"] += ls.y * MOVE_CMPS * speed * delta
-		o["fwd"] += rs.y * MOVE_CMPS * speed * delta
-		o["pitch"] += rs.x * PITCH_DPS * speed * delta
+		o["lr"] += offs.x * MOVE_CMPS * speed * delta
+		o["up"] += offs.y * MOVE_CMPS * speed * delta
+		o["fwd"] += prs.y * MOVE_CMPS * speed * delta
+		o["pitch"] += prs.x * PITCH_DPS * speed * delta
 
 	# apply pose: INI [up, lr, fwd] cm -> Godot metres (X right, Y up, -Z fwd)
 	if not offsets.is_empty():
@@ -969,13 +998,13 @@ func _process(delta: float) -> void:
 
 	# two-hand alignment ghost: rear->front controller line, shown while the
 	# off-hand is plausibly on the stock (15-100 cm from the primary hand)
-	if ghost_line and left and right:
-		var d := right.global_position.distance_to(left.global_position)
-		if left.get_is_active() and d > 0.15 and d < 1.0:
-			var dir := (left.global_position - right.global_position) / d
+	if ghost_line and primary and offhand:
+		var d := primary.global_position.distance_to(offhand.global_position)
+		if offhand.get_is_active() and d > 0.15 and d < 1.0:
+			var dir := (offhand.global_position - primary.global_position) / d
 			ghost_line.visible = true
-			_set_line(ghost_line, right.global_position - dir * 0.15,
-				right.global_position + dir * 1.0)
+			_set_line(ghost_line, primary.global_position - dir * 0.15,
+				primary.global_position + dir * 1.0)
 		else:
 			ghost_line.visible = false
 
