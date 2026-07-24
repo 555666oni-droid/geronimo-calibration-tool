@@ -73,6 +73,26 @@ Every launch, the tool snapshots your INI into:
 CALIBRATION SECTION back into your current file - your graphics/audio settings
 are never touched by a restore. Experiment freely; you can always walk it back.
 
+TWO-HANDED ALIGNMENT (the cyan + orange lines)
+----------------------------------------------
+When you grab the foregrip in-game, Geronimo IGNORES the calibration's
+orientation and re-aims the gun along the line between your two controllers.
+No calibration (this tool's or the game's) can change that - it is pure
+physical mount geometry. If your front controller sits too high or low on
+your stock, the gun visibly jumps the moment you grip the foregrip.
+
+The tool shows you this before you ever launch the game:
+  CYAN line   = your live rear->front controller line (what the game will
+                aim along when both hands grip)
+  ORANGE line = the rifle's own grip->foregrip expectation
+Hold your stock two-handed and look at the lines: if cyan is tilted relative
+to orange, physically adjust your FRONT controller mount (usually its height)
+until the cyan line lies along the orange one. When they match, gripping the
+foregrip in-game will not shift the gun. Rule of thumb: your controllers
+should sit where your HANDS sit on a real rifle - rear hand well below bore,
+front hand only slightly below bore. Short guns (MCX Rattler!) magnify any
+mismatch, so check alignment with a short gun selected.
+
 A NOTE ON "PATH UNVERIFIED" GUNS
 --------------------------------
 Guns you've never calibrated in-game are added using best-guess internal class

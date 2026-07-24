@@ -127,6 +127,12 @@ var backup_files: Array[String] = []
 var restore_sel := 0
 var nav_cd := 0.0
 
+# Two-hand alignment ghost: CYAN = your physical rear->front controller line
+# (what the game will aim the gun along when you grab the foregrip); ORANGE =
+# the rifle's own grip->foregrip expectation. Adjust your front mount until
+# cyan lies on orange and grabbing the foregrip in-game won't shift the gun.
+var ghost_line: MeshInstance3D
+
 
 func _ready() -> void:
 	_build_environment()
@@ -312,9 +318,51 @@ func _build_rifle() -> void:
 	optic_nodes["dot_gbrs"] = _build_dot(0.074, Color(0.35, 0.30, 0.22))    # GBRS Mount1 2.91"
 	optic_nodes["acog"] = _build_acog()
 
+	# ORANGE reference: the rifle's own grip->foregrip line (what the game's
+	# two-hand solve expects), drawn from the pistol grip through the C-clamp
+	# point under the handguard, extended 1 m.
+	var ref := _make_line(0.0015, Color(1.0, 0.55, 0.1))
+	rifle_body.add_child(ref)
+	var ga := Vector3(0.0, -0.005, 0.01)
+	var gdir := (Vector3(0.0, 0.055, -0.31) - ga).normalized()
+	ref.transform = _line_transform(ga - gdir * 0.15, ga + gdir * 1.0)
+
 	# ---- pistol body ----
 	_build_pistol()
 	_apply_optic()
+
+	# CYAN ghost: live physical rear->front controller line (world space)
+	ghost_line = _make_line(0.002, Color(0.2, 0.9, 1.0))
+	add_child(ghost_line)
+	ghost_line.visible = false
+
+
+func _line_transform(a: Vector3, b: Vector3) -> Transform3D:
+	# transform that stretches a unit cylinder (Y axis) between two points
+	var d := b - a
+	var l := maxf(d.length(), 0.001)
+	var yb := d / l
+	var xb := yb.cross(Vector3.UP)
+	if xb.length() < 0.01:
+		xb = yb.cross(Vector3.FORWARD)
+	xb = xb.normalized()
+	var zb := xb.cross(yb)
+	return Transform3D(Basis(xb, yb * l, zb), (a + b) * 0.5)
+
+
+func _set_line(mi: MeshInstance3D, a: Vector3, b: Vector3) -> void:
+	mi.global_transform = _line_transform(a, b)
+
+
+func _make_line(radius: float, col: Color) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var cy := CylinderMesh.new()
+	cy.top_radius = radius
+	cy.bottom_radius = radius
+	cy.height = 1.0
+	mi.mesh = cy
+	mi.material_override = _emat(col)
+	return mi
 
 
 func _build_pistol() -> void:
@@ -871,6 +919,18 @@ func _process(delta: float) -> void:
 		var o2: Dictionary = offsets[cur]
 		rifle.position = base_pos + Vector3(o2["lr"], o2["up"], -o2["fwd"]) * 0.01
 		rifle.rotation_degrees = Vector3(base_pitch + PITCH_SIGN * o2["pitch"], 0.0, 0.0)
+
+	# two-hand alignment ghost: rear->front controller line, shown while the
+	# off-hand is plausibly on the stock (15-100 cm from the primary hand)
+	if ghost_line and left and right:
+		var d := right.global_position.distance_to(left.global_position)
+		if left.get_is_active() and d > 0.15 and d < 1.0:
+			var dir := (left.global_position - right.global_position) / d
+			ghost_line.visible = true
+			_set_line(ghost_line, right.global_position - dir * 0.15,
+				right.global_position + dir * 1.0)
+		else:
+			ghost_line.visible = false
 
 	# save chord
 	var lt := left.get_float("trigger")
