@@ -46,7 +46,7 @@ backup if it happens).
 | RIGHT A / B | next / previous gun |
 | RIGHT stick click | cycle optic: irons / EOTech EXPS3 / T-2 on GBRS Hydra 2.91" |
 | LEFT stick click | backup **restore menu** (stick = select, A = restore, B = cancel) |
-| LEFT X | toggle base-adjust (anchor) mode |
+| LEFT X | cycle mode: offset / base-adjust / **two-hand capture** (hold stock two-handed, pull both triggers → full calibration in one shot, foregrip point placed on your front controller) |
 | LEFT Y | revert current gun to last saved values |
 | BOTH TRIGGERS | **save** to the Geronimo INI |
 

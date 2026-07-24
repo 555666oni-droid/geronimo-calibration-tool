@@ -21,7 +21,10 @@ extends Node3D
 #                                       pistols get irons/slide dot (SRO)
 #   LEFT STICK CLICK                  = backup RESTORE menu (stick up/down =
 #                                       select, RIGHT A = restore, B = cancel)
-#   LEFT  X                           = toggle BASE-ADJUST (anchor) mode
+#   LEFT  X                           = cycle mode: OFFSET -> BASE-ADJUST ->
+#                                       TWO-HAND CAPTURE (hold the stock with
+#                                       both hands, pull both triggers: computes
+#                                       the whole calibration in one shot)
 #   LEFT  Y                           = revert current gun to last saved values
 #
 # The tool snapshots the INI into CalibToolBackups\ (next to the INI) on every
@@ -116,7 +119,12 @@ var pistol_body: Node3D
 
 var base_pos := Vector3(0.0, -0.02, 0.0)
 var base_pitch := 0.0
-var anchor_mode := false
+# 0 = OFFSET (normal), 1 = BASE-ADJUST (anchor), 2 = TWO-HAND CAPTURE
+var mode := 0
+const MODE_NAMES := ["OFFSET", "BASE-ADJUST", "TWO-HAND CAPTURE"]
+# rifle-local reference points for the two-hand solve (tunable to the game)
+const GRIP_PT := Vector3(0.0, -0.005, 0.01)
+const SOCKET_PT := Vector3(0.0, 0.05, -0.31)
 var save_latch := false
 var backed_up := false
 var flash_t := 0.0
@@ -805,6 +813,40 @@ func _save_ini() -> void:
 	_flash("SAVED  " + gun_names[cur], 3.0)
 
 
+# ---------------------------------------------------------------- 2-hand capture
+func _two_hand_capture() -> void:
+	# One-shot calibration from a natural two-handed hold: compute the offset
+	# that (a) pitches the barrel along your physical rear->front hand line and
+	# (b) puts the rifle's foregrip point exactly on your front controller — so
+	# the in-game grab dot is reachable AND gripping the foregrip causes no jump
+	# (the two-hand solve becomes a no-op).
+	if offsets.is_empty() or left == null or not left.get_is_active():
+		_flash("OFF-HAND NOT TRACKED - capture aborted", 3.0, Color(1.0, 0.25, 0.2))
+		return
+	var f_local: Vector3 = right.to_local(left.global_position)   # front hand in controller space
+	if f_local.length() < 0.15 or f_local.length() > 1.0:
+		_flash("HANDS NOT ON STOCK? - capture aborted", 3.0, Color(1.0, 0.25, 0.2))
+		return
+	# pitch: elevation of the physical hand line minus the model's own
+	# grip->socket elevation (so the socket line lies ON the hand line)
+	var v := f_local
+	var line_elev := rad_to_deg(atan2(v.y, Vector2(v.x, v.z).length()))
+	var sv := SOCKET_PT - GRIP_PT
+	var model_elev := rad_to_deg(atan2(sv.y, Vector2(sv.x, sv.z).length()))
+	var total_pitch := line_elev - model_elev
+	var o: Dictionary = offsets[cur]
+	o["pitch"] = (total_pitch - base_pitch) / PITCH_SIGN
+	# translation: place the model's foregrip point exactly on the front controller
+	var rot := Basis(Vector3.RIGHT, deg_to_rad(base_pitch + PITCH_SIGN * o["pitch"]))
+	var pos := f_local - rot * SOCKET_PT          # rifle origin in controller space
+	var t := (pos - base_pos) * 100.0             # metres -> cm
+	o["lr"] = t.x
+	o["up"] = t.y
+	o["fwd"] = -t.z
+	mode = 0
+	_flash("CAPTURED %s - review, then save" % gun_names[cur], 3.5)
+
+
 # ---------------------------------------------------------------- base pose
 func _load_base_pose() -> void:
 	var cfg := ConfigFile.new()
@@ -847,7 +889,7 @@ func _on_left_button(bname: String) -> void:
 	if bname == "primary_click":
 		restore_mode = not restore_mode
 		if restore_mode:
-			anchor_mode = false
+			mode = 0
 			backup_files = _list_backups()
 			restore_sel = 0
 			if backup_files.is_empty():
@@ -857,8 +899,11 @@ func _on_left_button(bname: String) -> void:
 	if restore_mode:
 		return
 	if bname == "ax_button":
-		anchor_mode = not anchor_mode
-		_flash("BASE-ADJUST %s" % ("ON" if anchor_mode else "OFF"), 2.0, Color(1.0, 0.8, 0.2))
+		mode = (mode + 1) % 3
+		var msg: String = "MODE: " + MODE_NAMES[mode]
+		if mode == 2:
+			msg += " - hold stock 2-handed, pull both triggers"
+		_flash(msg, 2.5, Color(1.0, 0.8, 0.2))
 	elif bname == "by_button":
 		if not offsets.is_empty():
 			offsets[cur] = saved_vals[cur].duplicate()
@@ -902,11 +947,13 @@ func _process(delta: float) -> void:
 		_update_hud()
 		return
 
-	if anchor_mode:
+	if mode == 1:
 		base_pos.x += ls.x * MOVE_CMPS * 0.01 * speed * delta
 		base_pos.y += ls.y * MOVE_CMPS * 0.01 * speed * delta
 		base_pos.z += -rs.y * MOVE_CMPS * 0.01 * speed * delta
 		base_pitch += rs.x * PITCH_DPS * speed * delta
+	elif mode == 2:
+		pass                                   # capture mode: sticks disabled
 	elif not offsets.is_empty():
 		var o: Dictionary = offsets[cur]
 		o["lr"] += ls.x * MOVE_CMPS * speed * delta
@@ -938,8 +985,10 @@ func _process(delta: float) -> void:
 	if lt > TRIG_ON and rt > TRIG_ON:
 		if not save_latch:
 			save_latch = true
-			if anchor_mode:
+			if mode == 1:
 				_save_base_pose()
+			elif mode == 2:
+				_two_hand_capture()
 			else:
 				_save_ini()
 	elif lt < TRIG_OFF and rt < TRIG_OFF:
@@ -982,11 +1031,13 @@ func _update_hud() -> void:
 	if cur < optic_choice.size():
 		optic_name = lst[clampi(optic_choice[cur], 0, lst.size() - 1)]["name"]
 	var status_line := ""
-	if not gun_in_ini[cur]:
+	if mode == 2:
+		status_line = "TWO-HAND CAPTURE: hold naturally, pull both triggers"
+	elif mode == 1:
+		status_line = "MODE: BASE-ADJUST"
+	elif not gun_in_ini[cur]:
 		status_line = "NEW - not in game save yet" \
 			+ (" (path unverified)" if _is_candidate_path(gun_paths[cur]) else "")
-	elif anchor_mode:
-		status_line = "MODE: BASE-ADJUST"
 	hud.text = "%s  (%d/%d)%s
 UP    %+7.2f cm
 LR    %+7.2f cm

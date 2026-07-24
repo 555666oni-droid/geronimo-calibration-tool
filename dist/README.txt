@@ -61,9 +61,22 @@ CONTROLS
                       Pistols: irons / slide dot (SRO).
   LEFT STICK CLICK  : backup RESTORE menu (stick up/down = select,
                       RIGHT A = restore, RIGHT B = cancel)
-  LEFT X       : toggle BASE-ADJUST (anchor) mode
+  LEFT X       : cycle mode - OFFSET / BASE-ADJUST / TWO-HAND CAPTURE
   LEFT Y       : revert current gun to last saved values
-  BOTH TRIGGERS: SAVE
+  BOTH TRIGGERS: SAVE (in OFFSET mode) / capture (in TWO-HAND CAPTURE mode)
+
+TWO-HAND CAPTURE (one-shot auto-calibration)
+--------------------------------------------
+Press LEFT X twice to enter TWO-HAND CAPTURE, hold your stock naturally with
+BOTH hands, and pull both triggers. The tool computes the whole calibration in
+one shot from your two controller positions: the barrel is pitched along your
+physical hand line, and the rifle's foregrip point is placed exactly on your
+front controller. That means (a) the in-game foregrip grab dot appears right
+where your real hand already is, and (b) grabbing it causes NO jump - the
+game's two-hand solve lands on the pose you calibrated. Review the result,
+trim with sticks if needed, then save normally.
+For best results, position each gun's foregrip attachment in-game along the
+rail so its distance from the pistol grip matches your physical front mount.
 
 BACKUPS
 -------
