@@ -51,9 +51,14 @@ CONTROLS
   LEFT stick   : Up/Down + Left/Right
   RIGHT stick  : Forward/Back + Pitch
   hold GRIP    : fine adjustment (15% speed)
-  RIGHT A / B  : next / previous gun
-  RIGHT STICK CLICK : cycle optic - iron sights / EOTech EXPS3 /
-                      Aimpoint T-2 on GBRS Hydra 2.91" (remembered per gun)
+  RIGHT A / B  : next / previous gun - ALL 23 game guns are available (rifles,
+                 SMGs, pistols, shotgun, LMG, bolt guns), not just ones you've
+                 calibrated before. New guns start from your best existing
+                 calibration and show "NEW" until you save them.
+  RIGHT STICK CLICK : cycle optic (remembered per gun) - rifles: iron sights /
+                      EOTech EXPS3 / red dot at the game's four mount heights
+                      (LOW 1.42" / TALL 1.93" / UNITY 2.26" / GBRS 2.91") / ACOG.
+                      Pistols: irons / slide dot (SRO).
   LEFT STICK CLICK  : backup RESTORE menu (stick up/down = select,
                       RIGHT A = restore, RIGHT B = cancel)
   LEFT X       : toggle BASE-ADJUST (anchor) mode
@@ -67,6 +72,16 @@ Every launch, the tool snapshots your INI into:
 (newest 30 kept). The RESTORE menu (left stick click) splices a backup's
 CALIBRATION SECTION back into your current file - your graphics/audio settings
 are never touched by a restore. Experiment freely; you can always walk it back.
+
+A NOTE ON "PATH UNVERIFIED" GUNS
+--------------------------------
+Guns you've never calibrated in-game are added using best-guess internal class
+paths (the game's files are compressed, so they can't all be confirmed from
+outside). If a gun you calibrated here doesn't respond in-game: open the game's
+own calibration on that gun once, pull both triggers (ignore the snap-back), and
+quit. The game writes the gun's TRUE path; this tool detects it on next launch,
+adopts it automatically, and keeps your saved values. Save that gun once more in
+the tool and it's fixed permanently.
 
 IMPORTANT
 ---------

@@ -15,8 +15,10 @@ extends Node3D
 #   LEFT stick   Y = Up/Down          X = Left/Right
 #   RIGHT stick  Y = Forward/Back     X = Pitch
 #   hold either GRIP                  = fine adjust (15% speed)
-#   RIGHT A / B                       = next / previous gun
-#   RIGHT STICK CLICK                 = cycle optic (irons / EXPS3 / T-2 Hydra)
+#   RIGHT A / B                       = next / previous gun (all 23 game guns)
+#   RIGHT STICK CLICK                 = cycle optic: rifles get irons/EXPS3/dot at
+#                                       LOW-TALL-UNITY-GBRS mount heights/ACOG;
+#                                       pistols get irons/slide dot (SRO)
 #   LEFT STICK CLICK                  = backup RESTORE menu (stick up/down =
 #                                       select, RIGHT A = restore, B = cancel)
 #   LEFT  X                           = toggle BASE-ADJUST (anchor) mode
@@ -54,15 +56,63 @@ var board_status: Label3D
 var ini_path := ""
 var eol := "\r\n"
 var gun_names: Array[String] = []
+var gun_paths: Array[String] = []  # full class paths, parallel with gun_names
+var gun_in_ini: Array[bool] = []   # false = not yet written to the game's INI
 var offsets: Array = []          # [{up, lr, fwd, pitch}] parallel with gun_names
 var saved_vals: Array = []       # last loaded/saved values (dirty marker)
 var cur := 0
 
-const OPTIC_NAMES := ["IRON SIGHTS", "EOTECH EXPS3", "T-2 on GBRS HYDRA"]
+# Full weapon roster (from the game files). "verified" paths were confirmed from a
+# real INI written by the game; the rest are best-guess candidates (the game's
+# content store is compressed, so they can't be confirmed statically). The tool
+# merges by CLASS NAME, so if the game ever writes a gun's true path (a single
+# both-triggers pull in its in-game calibration is enough), that path wins
+# automatically and your saved values are kept.
+const KNOWN_GUNS := [
+	{"path": "/Game/Weapons/AK74M/Blueprints/Firearm_Rifle_AK74M.Firearm_Rifle_AK74M_C", "verified": true},
+	{"path": "/Game/Weapons/HK416a5/Blueprints/Firearm_Rifle_HK416A5_279mm.Firearm_Rifle_HK416A5_279mm_C", "verified": true},
+	{"path": "/Game/Weapons/HK416a5/Blueprints/Firearm_Rifle_HK416A5_368mm.Firearm_Rifle_HK416A5_368mm_C", "verified": false},
+	{"path": "/Game/Weapons/M4A1_URGI/Blueprint/Firearm_Rifle_M4A1_BlockIICQBR.Firearm_Rifle_M4A1_BlockIICQBR_C", "verified": true},
+	{"path": "/Game/Weapons/M4A1_URGI/Blueprint/Firearm_Rifle_M4A1_URGI.Firearm_Rifle_M4A1_URGI_C", "verified": true},
+	{"path": "/Game/Weapons/MCX_LT/Blueprint/Firearm_Rifle_MCX_LT_CSAW.Firearm_Rifle_MCX_LT_CSAW_C", "verified": true},
+	{"path": "/Game/Weapons/MCX_LT/Blueprint/Firearm_Rifle_MCX_LT_Rattler.Firearm_Rifle_MCX_LT_Rattler_C", "verified": true},
+	{"path": "/Game/Weapons/G28/Blueprints/Firearm_Rifle_G28.Firearm_Rifle_G28_C", "verified": false},
+	{"path": "/Game/Weapons/KAC/Blueprints/Firearm_Rifle_KAC_KS1.Firearm_Rifle_KAC_KS1_C", "verified": false},
+	{"path": "/Game/Weapons/KAC/Blueprints/Firearm_Rifle_KAC_M110.Firearm_Rifle_KAC_M110_C", "verified": false},
+	{"path": "/Game/Weapons/KAC/Blueprints/Firearm_Rifle_KAC_SR25.Firearm_Rifle_KAC_SR25_C", "verified": false},
+	{"path": "/Game/Weapons/Tavor_X95/Blueprints/Firearm_Rifle_Tavor_X95.Firearm_Rifle_Tavor_X95_C", "verified": false},
+	{"path": "/Game/Weapons/MP5/Blueprints/Firearm_SMG_MP5_A5.Firearm_SMG_MP5_A5_C", "verified": false},
+	{"path": "/Game/Weapons/MP5/Blueprints/Firearm_SMG_MP5SD.Firearm_SMG_MP5SD_C", "verified": false},
+	{"path": "/Game/Weapons/MP7/Blueprints/Firearm_SMG_MP7A2.Firearm_SMG_MP7A2_C", "verified": false},
+	{"path": "/Game/Weapons/Remington700/Blueprints/Firearm_BoltAction_Remington700.Firearm_BoltAction_Remington700_C", "verified": false},
+	{"path": "/Game/Weapons/Remington700/Blueprints/Firearm_BoltAction_R700_MDTESS.Firearm_BoltAction_R700_MDTESS_C", "verified": false},
+	{"path": "/Game/Weapons/PKP/Blueprints/Firearm_LMG_PKP.Firearm_LMG_PKP_C", "verified": false},
+	{"path": "/Game/Weapons/870MCS/Blueprints/Firearm_Shotgun_870MCS.Firearm_Shotgun_870MCS_C", "verified": false},
+	{"path": "/Game/Weapons/G19_Gen5/Blueprints/Firearm_Pistol_G19_Gen5.Firearm_Pistol_G19_Gen5_C", "verified": false},
+	{"path": "/Game/Weapons/P320/Blueprints/Firearm_Pistol_P320.Firearm_Pistol_P320_C", "verified": false},
+	{"path": "/Game/Weapons/Staccato/Blueprints/Firearm_Pistol_Staccato.Firearm_Pistol_Staccato_C", "verified": false},
+	{"path": "/Game/Weapons/USP45/Blueprints/Firearm_Pistol_USP45.Firearm_Pistol_USP45_C", "verified": false},
+]
+
+# Optic tiers matching the game's real mounts (heights = optical centre over rail):
+# Short/lower-1/3 1.42", Tall 1.93", Unity FAST 2.26", GBRS Mount1 2.91".
+const RIFLE_OPTICS := [
+	{"name": "IRON SIGHTS", "node": "irons"},
+	{"name": "EOTECH EXPS3", "node": "exps3"},
+	{"name": "RED DOT - LOW 1.42\"", "node": "dot_low"},
+	{"name": "RED DOT - TALL 1.93\"", "node": "dot_tall"},
+	{"name": "RED DOT - UNITY 2.26\"", "node": "dot_unity"},
+	{"name": "RED DOT - GBRS 2.91\"", "node": "dot_gbrs"},
+	{"name": "ACOG 4x", "node": "acog"},
+]
+const PISTOL_OPTICS := [
+	{"name": "IRON SIGHTS", "node": "p_irons"},
+	{"name": "SLIDE DOT (SRO)", "node": "p_sro"},
+]
 var optic_choice: Array = []     # per-gun optic index, parallel with gun_names
-var irons_node: Node3D
-var exps3_node: Node3D
-var t2_node: Node3D
+var optic_nodes := {}            # node-key -> Node3D
+var rifle_body: Node3D
+var pistol_body: Node3D
 
 var base_pos := Vector3(0.0, -0.02, 0.0)
 var base_pitch := 0.0
@@ -216,14 +266,17 @@ func _build_rifle() -> void:
 
 	var dark := Color(0.13, 0.13, 0.14)
 	var mid := Color(0.2, 0.2, 0.22)
-	# origin = pistol grip. -Z is forward.
-	_add_box(rifle, Vector3(0.045, 0.060, 0.30), Vector3(0.0, 0.070, -0.050), mid)      # receiver
-	_add_box(rifle, Vector3(0.040, 0.050, 0.22), Vector3(0.0, 0.080, -0.310), dark)     # handguard
-	_add_box(rifle, Vector3(0.035, 0.090, 0.050), Vector3(0.0, -0.005, 0.010), dark)    # grip
-	_add_box(rifle, Vector3(0.040, 0.050, 0.20), Vector3(0.0, 0.055, 0.150), dark)      # stock
-	_add_box(rifle, Vector3(0.045, 0.110, 0.020), Vector3(0.0, 0.045, 0.255), mid)      # buttpad
-	_add_box(rifle, Vector3(0.035, 0.110, 0.060), Vector3(0.0, -0.010, -0.110), mid)    # magazine
 
+	# ---- long-gun body (rifles / SMGs / shotguns / LMG / bolt) ----
+	rifle_body = Node3D.new()
+	rifle.add_child(rifle_body)
+	# origin = pistol grip. -Z is forward.
+	_add_box(rifle_body, Vector3(0.045, 0.060, 0.30), Vector3(0.0, 0.070, -0.050), mid)     # receiver
+	_add_box(rifle_body, Vector3(0.040, 0.050, 0.22), Vector3(0.0, 0.080, -0.310), dark)    # handguard
+	_add_box(rifle_body, Vector3(0.035, 0.090, 0.050), Vector3(0.0, -0.005, 0.010), dark)   # grip
+	_add_box(rifle_body, Vector3(0.040, 0.050, 0.20), Vector3(0.0, 0.055, 0.150), dark)     # stock
+	_add_box(rifle_body, Vector3(0.045, 0.110, 0.020), Vector3(0.0, 0.045, 0.255), mid)     # buttpad
+	_add_box(rifle_body, Vector3(0.035, 0.110, 0.060), Vector3(0.0, -0.010, -0.110), mid)   # magazine
 	var barrel := MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = 0.011
@@ -233,11 +286,12 @@ func _build_rifle() -> void:
 	barrel.rotation_degrees = Vector3(90.0, 0.0, 0.0)
 	barrel.position = Vector3(0.0, 0.085, -0.500)
 	barrel.material_override = _mat(dark)
-	rifle.add_child(barrel)
+	rifle_body.add_child(barrel)
 
-	irons_node = Node3D.new()
-	rifle.add_child(irons_node)
-	# rear peep ring
+	# rifle iron sights
+	var irons := Node3D.new()
+	rifle_body.add_child(irons)
+	optic_nodes["irons"] = irons
 	var ring := MeshInstance3D.new()
 	var tor := TorusMesh.new()
 	tor.inner_radius = 0.006
@@ -246,14 +300,114 @@ func _build_rifle() -> void:
 	ring.rotation_degrees = Vector3(90.0, 0.0, 0.0)
 	ring.position = Vector3(0.0, 0.125, 0.030)
 	ring.material_override = _mat(Color.BLACK)
-	irons_node.add_child(ring)
-	# front post (bright tip for easy sight picture)
-	_add_box(irons_node, Vector3(0.004, 0.018, 0.004), Vector3(0.0, 0.122, -0.640), Color(1.0, 0.45, 0.05))
-	_add_box(irons_node, Vector3(0.020, 0.014, 0.010), Vector3(0.0, 0.105, -0.640), dark)  # front sight base
+	irons.add_child(ring)
+	_add_box(irons, Vector3(0.004, 0.018, 0.004), Vector3(0.0, 0.122, -0.640), Color(1.0, 0.45, 0.05))
+	_add_box(irons, Vector3(0.020, 0.014, 0.010), Vector3(0.0, 0.105, -0.640), dark)
 
+	# rifle optics (heights = optical centre above rail at y 0.100)
 	_build_exps3()
-	_build_t2_hydra()
+	optic_nodes["dot_low"] = _build_dot(0.036, Color(0.10, 0.10, 0.11))     # 1.42"
+	optic_nodes["dot_tall"] = _build_dot(0.049, Color(0.10, 0.10, 0.11))    # 1.93"
+	optic_nodes["dot_unity"] = _build_dot(0.057, Color(0.35, 0.30, 0.22))   # Unity FAST 2.26"
+	optic_nodes["dot_gbrs"] = _build_dot(0.074, Color(0.35, 0.30, 0.22))    # GBRS Mount1 2.91"
+	optic_nodes["acog"] = _build_acog()
+
+	# ---- pistol body ----
+	_build_pistol()
 	_apply_optic()
+
+
+func _build_pistol() -> void:
+	pistol_body = Node3D.new()
+	rifle.add_child(pistol_body)
+	var dark := Color(0.13, 0.13, 0.14)
+	var mid := Color(0.22, 0.22, 0.24)
+	# origin = grip, -Z forward. Slide top ~0.10 to keep sight lines comparable.
+	_add_box(pistol_body, Vector3(0.032, 0.100, 0.048), Vector3(0.0, 0.010, 0.008), dark)   # grip
+	_add_box(pistol_body, Vector3(0.032, 0.028, 0.170), Vector3(0.0, 0.068, -0.045), mid)   # frame
+	_add_box(pistol_body, Vector3(0.034, 0.032, 0.190), Vector3(0.0, 0.086, -0.045), dark)  # slide
+	_add_box(pistol_body, Vector3(0.026, 0.006, 0.052), Vector3(0.0, 0.046, -0.062), dark)  # trigger guard
+	# pistol irons
+	var pi := Node3D.new()
+	pistol_body.add_child(pi)
+	optic_nodes["p_irons"] = pi
+	_add_box(pi, Vector3(0.006, 0.008, 0.004), Vector3(-0.006, 0.106, 0.044), dark)         # rear notch L
+	_add_box(pi, Vector3(0.006, 0.008, 0.004), Vector3(0.006, 0.106, 0.044), dark)          # rear notch R
+	_add_box(pi, Vector3(0.0035, 0.008, 0.0035), Vector3(0.0, 0.105, -0.135), Color(0.2, 1.0, 0.4))  # front dot
+	# slide-mounted SRO
+	var sro := Node3D.new()
+	pistol_body.add_child(sro)
+	optic_nodes["p_sro"] = sro
+	_add_box(sro, Vector3(0.028, 0.006, 0.045), Vector3(0.0, 0.105, 0.030), Color(0.10, 0.10, 0.11))
+	var win := MeshInstance3D.new()
+	var wt := TorusMesh.new()
+	wt.inner_radius = 0.0105
+	wt.outer_radius = 0.0135
+	win.mesh = wt
+	win.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	win.position = Vector3(0.0, 0.122, 0.018)
+	win.material_override = _mat(Color(0.10, 0.10, 0.11))
+	sro.add_child(win)
+	var dot := _add_box(sro, Vector3(0.0018, 0.0018, 0.001), Vector3(0.0, 0.122, 0.018), Color(1.0, 0.12, 0.08))
+	dot.material_override = _emat(Color(1.0, 0.12, 0.08))
+
+
+func _build_dot(h: float, mount_col: Color) -> Node3D:
+	# Generic tube red dot (T-2/CompM5/MRO class) with optical centre h above the rail.
+	var n := Node3D.new()
+	rifle_body.add_child(n)
+	var body := Color(0.10, 0.10, 0.11)
+	var oc := 0.100 + h
+	_add_box(n, Vector3(0.030, 0.012, 0.070), Vector3(0.0, 0.106, -0.020), mount_col)       # base
+	if h > 0.024:
+		_add_box(n, Vector3(0.024, oc - 0.118, 0.034), Vector3(0.0, 0.112 + (oc - 0.118) * 0.5, -0.020), mount_col)  # tower
+	var tube := MeshInstance3D.new()
+	var cy := CylinderMesh.new()
+	cy.top_radius = 0.0125
+	cy.bottom_radius = 0.0125
+	cy.height = 0.062
+	tube.mesh = cy
+	tube.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	tube.position = Vector3(0.0, oc, -0.020)
+	tube.material_override = _mat(body)
+	n.add_child(tube)
+	for zz in [-0.052, 0.012]:
+		var bell := MeshInstance3D.new()
+		var bc := CylinderMesh.new()
+		bc.top_radius = 0.0145
+		bc.bottom_radius = 0.0145
+		bc.height = 0.010
+		bell.mesh = bc
+		bell.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+		bell.position = Vector3(0.0, oc, zz)
+		bell.material_override = _mat(body)
+		n.add_child(bell)
+	var dot := _add_box(n, Vector3(0.0018, 0.0018, 0.001), Vector3(0.0, oc, -0.020), Color(1.0, 0.12, 0.08))
+	dot.material_override = _emat(Color(1.0, 0.12, 0.08))
+	return n
+
+
+func _build_acog() -> Node3D:
+	# ACOG 4x: stubby scope, optical centre ~1.5" (38 mm) over rail.
+	var n := Node3D.new()
+	rifle_body.add_child(n)
+	var body := Color(0.10, 0.10, 0.11)
+	var oc := 0.138
+	_add_box(n, Vector3(0.032, 0.016, 0.080), Vector3(0.0, 0.108, -0.020), body)
+	var tube := MeshInstance3D.new()
+	var cy := CylinderMesh.new()
+	cy.top_radius = 0.019
+	cy.bottom_radius = 0.015
+	cy.height = 0.13
+	tube.mesh = cy
+	tube.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	tube.position = Vector3(0.0, oc, -0.030)
+	tube.material_override = _mat(body)
+	n.add_child(tube)
+	# red chevron reticle
+	var ch := _add_box(n, Vector3(0.003, 0.0022, 0.001), Vector3(0.0, oc, 0.036), Color(1.0, 0.12, 0.08))
+	ch.material_override = _emat(Color(1.0, 0.12, 0.08))
+	return n
 
 
 func _emat(c: Color) -> StandardMaterial3D:
@@ -269,8 +423,9 @@ func _emat(c: Color) -> StandardMaterial3D:
 func _build_exps3() -> void:
 	# EOTech EXPS3: boxy holographic sight on the receiver rail.
 	# Rail top y=0.100; optical centre ~36 mm above rail -> y ~0.136.
-	exps3_node = Node3D.new()
-	rifle.add_child(exps3_node)
+	var exps3_node := Node3D.new()
+	rifle_body.add_child(exps3_node)
+	optic_nodes["exps3"] = exps3_node
 	var body := Color(0.10, 0.10, 0.11)
 	_add_box(exps3_node, Vector3(0.048, 0.016, 0.098), Vector3(0.0, 0.108, -0.020), body)  # QD mount base
 	_add_box(exps3_node, Vector3(0.052, 0.040, 0.062), Vector3(0.0, 0.134, 0.000), body)   # rear body / hood
@@ -294,51 +449,30 @@ func _build_exps3() -> void:
 	dot.material_override = _emat(Color(1.0, 0.12, 0.08))
 
 
-func _build_t2_hydra() -> void:
-	# Aimpoint Micro T-2 on a GBRS Hydra 2.91" mount.
-	# Rail top y=0.100; 2.91" = 74 mm to optical centre -> y ~0.174 (head-up height).
-	t2_node = Node3D.new()
-	rifle.add_child(t2_node)
-	var mount_col := Color(0.35, 0.30, 0.22)   # FDE-ish
-	var body := Color(0.10, 0.10, 0.11)
-	_add_box(t2_node, Vector3(0.030, 0.014, 0.070), Vector3(0.0, 0.107, -0.020), mount_col)  # mount base
-	_add_box(t2_node, Vector3(0.024, 0.052, 0.034), Vector3(0.0, 0.140, -0.020), mount_col)  # riser tower
-	var tube := MeshInstance3D.new()
-	var cy := CylinderMesh.new()
-	cy.top_radius = 0.0125
-	cy.bottom_radius = 0.0125
-	cy.height = 0.062
-	tube.mesh = cy
-	tube.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-	tube.position = Vector3(0.0, 0.174, -0.020)
-	tube.material_override = _mat(body)
-	t2_node.add_child(tube)
-	for zz in [-0.052, 0.012]:                                          # objective / ocular bells
-		var bell := MeshInstance3D.new()
-		var bc := CylinderMesh.new()
-		bc.top_radius = 0.0145
-		bc.bottom_radius = 0.0145
-		bc.height = 0.010
-		bell.mesh = bc
-		bell.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-		bell.position = Vector3(0.0, 0.174, zz)
-		bell.material_override = _mat(body)
-		t2_node.add_child(bell)
-	# 2 MOA red dot floating mid-tube
-	var dot := _add_box(t2_node, Vector3(0.0018, 0.0018, 0.001), Vector3(0.0, 0.174, -0.020), Color(1.0, 0.12, 0.08))
-	dot.material_override = _emat(Color(1.0, 0.12, 0.08))
+func _gun_is_pistol(i: int) -> bool:
+	if i < 0 or i >= gun_paths.size():
+		return false
+	return gun_paths[i].contains("Firearm_Pistol")
+
+
+func _optic_list(i: int) -> Array:
+	return PISTOL_OPTICS if _gun_is_pistol(i) else RIFLE_OPTICS
 
 
 func _apply_optic() -> void:
+	if rifle_body == null:
+		return                                   # headless tests: no scene built
+	var pistol := _gun_is_pistol(cur)
+	rifle_body.visible = not pistol
+	pistol_body.visible = pistol
+	var lst := _optic_list(cur)
 	var idx := 0
 	if not optic_choice.is_empty() and cur < optic_choice.size():
-		idx = optic_choice[cur]
-	if irons_node:
-		irons_node.visible = idx == 0
-	if exps3_node:
-		exps3_node.visible = idx == 1
-	if t2_node:
-		t2_node.visible = idx == 2
+		idx = clampi(optic_choice[cur], 0, lst.size() - 1)
+	# hide every optic, then show the selected one for the visible body
+	for key in optic_nodes:
+		optic_nodes[key].visible = false
+	optic_nodes[lst[idx]["node"]].visible = true
 
 
 func _build_hud() -> void:
@@ -352,6 +486,24 @@ func _build_hud() -> void:
 
 
 # ---------------------------------------------------------------- INI handling
+func _class_of(path: String) -> String:
+	return path.get_file().get_slice(".", 0)     # e.g. Firearm_Rifle_M4A1_URGI
+
+
+func _display_name(cls: String) -> String:
+	var n := cls.trim_prefix("Firearm_")
+	for cat in ["Rifle_", "Pistol_", "SMG_", "LMG_", "BoltAction_", "Shotgun_"]:
+		n = n.trim_prefix(cat)
+	return n
+
+
+func _is_candidate_path(path: String) -> bool:
+	for g in KNOWN_GUNS:
+		if g["path"] == path and not g["verified"]:
+			return true
+	return false
+
+
 func _load_ini() -> bool:
 	var lad := OS.get_environment("LOCALAPPDATA")
 	if lad == "":
@@ -362,23 +514,68 @@ func _load_ini() -> bool:
 	var txt := FileAccess.get_file_as_string(ini_path)
 	eol = "\r\n" if txt.contains("\r\n") else "\n"
 	gun_names.clear()
+	gun_paths.clear()
+	gun_in_ini.clear()
 	offsets.clear()
+	var raw_paths: Array[String] = []
+	var raw_offsets: Array = []
 	for raw in txt.split("\n"):
 		var l := raw.strip_edges()
 		if l.begins_with("GunClassPaths="):
-			var n := l.get_slice("=", 1).get_file().get_slice(".", 0)
-			gun_names.append(n.replace("Firearm_Rifle_", ""))
+			raw_paths.append(l.get_slice("=", 1))
 		elif l.begins_with("GunTransforms="):
 			var v := l.get_slice("=", 1)
 			var t := v.get_slice("|", 0).split(",")
 			var r := v.get_slice("|", 1).split(",")
 			if t.size() >= 3 and r.size() >= 1:
-				offsets.append({
+				raw_offsets.append({
 					"up": t[0].to_float(), "lr": t[1].to_float(),
 					"fwd": t[2].to_float(), "pitch": r[0].to_float()
 				})
-	if gun_names.is_empty() or gun_names.size() != offsets.size():
+	if raw_paths.size() != raw_offsets.size():
 		return false
+	# merge INI rows by class name (game-written paths beat our candidates;
+	# calibrated values beat zeros)
+	for i in raw_paths.size():
+		var cls := _class_of(raw_paths[i])
+		var found := -1
+		for j in gun_paths.size():
+			if _class_of(gun_paths[j]) == cls:
+				found = j
+				break
+		if found == -1:
+			gun_names.append(_display_name(cls))
+			gun_paths.append(raw_paths[i])
+			gun_in_ini.append(true)
+			offsets.append(raw_offsets[i])
+		else:
+			if _is_candidate_path(gun_paths[found]) and not _is_candidate_path(raw_paths[i]):
+				gun_paths[found] = raw_paths[i]   # game-written path wins
+			var o: Dictionary = raw_offsets[i]
+			if absf(o["up"]) > 0.005 or absf(o["lr"]) > 0.005:
+				offsets[found] = o                # calibrated values win
+	# seed for new guns: copy an existing calibrated gun (same stock => close
+	# start). Prefer the URGI row (typically the best-verified), else the first.
+	var seed_off := {"up": 0.0, "lr": 0.0, "fwd": 8.0, "pitch": 0.0}
+	for j in gun_paths.size():
+		if _class_of(gun_paths[j]) == "Firearm_Rifle_M4A1_URGI":
+			seed_off = offsets[j].duplicate()
+			break
+	if seed_off["fwd"] == 8.0 and not offsets.is_empty():
+		seed_off = offsets[0].duplicate()
+	# append every known gun not present in the INI yet
+	for g in KNOWN_GUNS:
+		var cls: String = _class_of(g["path"])
+		var present := false
+		for j in gun_paths.size():
+			if _class_of(gun_paths[j]) == cls:
+				present = true
+				break
+		if not present:
+			gun_names.append(_display_name(cls))
+			gun_paths.append(g["path"])
+			gun_in_ini.append(false)
+			offsets.append(seed_off.duplicate())
 	saved_vals = offsets.duplicate(true)
 	for i in gun_names.size():
 		if gun_names[i] == "M4A1_URGI":
@@ -518,23 +715,36 @@ func _save_ini() -> void:
 		DirAccess.copy_absolute(ini_path, ini_path.get_base_dir() + "/GameUserSettings.pre-GodotTool.ini")
 		backed_up = true
 	var txt := FileAccess.get_file_as_string(ini_path)
-	var lines := txt.split("\n")
-	var n := -1
-	for i in lines.size():
-		if lines[i].strip_edges().begins_with("GunTransforms="):
-			n += 1
-			if n == cur:
-				var o: Dictionary = offsets[cur]
-				lines[i] = "GunTransforms=%.6f,%.6f,%.6f|%.6f,0.000000,0.000000|1.000000,1.000000,1.000000" \
-					% [o["up"], o["lr"], o["fwd"], o["pitch"]]
-				break
-	if n != cur:
-		_flash("ROW NOT FOUND - save aborted", 5.0, Color(1.0, 0.25, 0.2))
-		return
+	var lines := Array(txt.split("\n")).map(func(s): return String(s).trim_suffix("\r"))
+	# rebuild the calibration section from tool state: every gun already in the
+	# INI plus the one being saved now (keeps parallel arrays consistent and
+	# compacts any duplicate rows)
+	var persist: Array[int] = []
+	for i in gun_names.size():
+		if gun_in_ini[i] or i == cur:
+			persist.append(i)
+	var section: Array = [CALIB_SECTION]
+	for i in persist:
+		section.append("GunClassPaths=" + gun_paths[i])
+	for i in persist:
+		var o: Dictionary = offsets[i]
+		section.append("GunTransforms=%.6f,%.6f,%.6f|%.6f,0.000000,0.000000|1.000000,1.000000,1.000000" \
+			% [o["up"], o["lr"], o["fwd"], o["pitch"]])
+	var r := _extract_calib_section(lines)
+	var merged: Array
+	if r[0] == -1:
+		merged = lines + [""] + section              # section absent: append at EOF
+	else:
+		# carry over any other lines the section held (e.g. UniversalGunClassPath)
+		for k in range(r[0] + 1, r[1]):
+			var l := String(lines[k]).strip_edges()
+			if not (l.begins_with("GunClassPaths=") or l.begins_with("GunTransforms=")):
+				section.append(String(lines[k]))
+		merged = lines.slice(0, r[0]) + section + lines.slice(r[1])
 	var joined := ""
-	for i in lines.size():
-		joined += lines[i].trim_suffix("\r")
-		if i < lines.size() - 1:
+	for i in merged.size():
+		joined += String(merged[i])
+		if i < merged.size() - 1:
 			joined += eol
 	var f := FileAccess.open(ini_path, FileAccess.WRITE)
 	if f == null:
@@ -542,6 +752,7 @@ func _save_ini() -> void:
 		return
 	f.store_string(joined)
 	f.close()
+	gun_in_ini[cur] = true
 	saved_vals[cur] = offsets[cur].duplicate()
 	_flash("SAVED  " + gun_names[cur], 3.0)
 
@@ -577,10 +788,11 @@ func _on_right_button(bname: String) -> void:
 		_switch_gun(-1)
 	elif bname == "primary_click":
 		if not optic_choice.is_empty():
-			optic_choice[cur] = (optic_choice[cur] + 1) % OPTIC_NAMES.size()
+			var lst := _optic_list(cur)
+			optic_choice[cur] = (optic_choice[cur] + 1) % lst.size()
 			_apply_optic()
 			_save_optics()
-			_flash(OPTIC_NAMES[optic_choice[cur]], 1.5, Color(0.4, 0.7, 1.0))
+			_flash(lst[optic_choice[cur]]["name"], 1.5, Color(0.4, 0.7, 1.0))
 
 
 func _on_left_button(bname: String) -> void:
@@ -705,7 +917,16 @@ func _update_hud() -> void:
 	var s: Dictionary = saved_vals[cur]
 	var dirty := absf(o["up"] - s["up"]) > 0.005 or absf(o["lr"] - s["lr"]) > 0.005 \
 		or absf(o["fwd"] - s["fwd"]) > 0.005 or absf(o["pitch"] - s["pitch"]) > 0.005
-	var optic_name: String = OPTIC_NAMES[optic_choice[cur]] if cur < optic_choice.size() else ""
+	var lst := _optic_list(cur)
+	var optic_name: String = ""
+	if cur < optic_choice.size():
+		optic_name = lst[clampi(optic_choice[cur], 0, lst.size() - 1)]["name"]
+	var status_line := ""
+	if not gun_in_ini[cur]:
+		status_line = "NEW - not in game save yet" \
+			+ (" (path unverified)" if _is_candidate_path(gun_paths[cur]) else "")
+	elif anchor_mode:
+		status_line = "MODE: BASE-ADJUST"
 	hud.text = "%s  (%d/%d)%s
 UP    %+7.2f cm
 LR    %+7.2f cm
@@ -717,6 +938,6 @@ PITCH %+7.2f deg
 		"  *UNSAVED*" if dirty else "",
 		o["up"], o["lr"], o["fwd"], o["pitch"],
 		optic_name,
-		"MODE: BASE-ADJUST" if anchor_mode else ""
+		status_line
 	]
 	hud.modulate = Color(1.0, 0.85, 0.4) if dirty else Color.WHITE

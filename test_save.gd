@@ -4,24 +4,46 @@ func _init() -> void:
 	var n := Node3D.new()
 	n.set_script(load("res://main.gd"))
 	assert(n._load_ini())
+	var ini_gun_count := 0
+	for b in n.gun_in_ini:
+		if b:
+			ini_gun_count += 1
+	print("guns total/in-ini: %d/%d" % [n.gun_names.size(), ini_gun_count])
 	# redirect writes to a scratch copy
 	var scratch: String = OS.get_environment("TEMP").replace("\\", "/") + "/calibtool_test.ini"
 	DirAccess.copy_absolute(n.ini_path, scratch)
+	var orig := FileAccess.get_file_as_string(scratch)
 	n.ini_path = scratch
-	n.backed_up = true  # skip backup step in test
-	# modify AK74M (index 0): up 2.52 -> 14.52
-	n.cur = 0
-	n.offsets[0]["up"] = 14.52
+	n.backed_up = true
+	# find AK74M (in-ini) and a reference gun to verify untouched afterwards
+	var ak: int = n.gun_names.find("AK74M")
+	var urgi: int = n.gun_names.find("M4A1_URGI")
+	var urgi_before: Dictionary = n.offsets[urgi].duplicate()
+	n.cur = ak
+	n.offsets[ak]["up"] = 14.52
 	n._save_ini()
-	# re-read scratch and verify only that row changed
 	var txt := FileAccess.get_file_as_string(scratch)
-	print("row written: ", txt.contains("GunTransforms=14.520000,-4.123861,15.001390|0.000000"))
-	print("URGI row intact: ", txt.contains("GunTransforms=13.000000,-0.913739,4.230670|-16.456508"))
-	print("CRLF preserved: ", txt.contains("\r\n"))
-	var orig := FileAccess.get_file_as_string(
-		OS.get_environment("LOCALAPPDATA").replace("\\", "/")
-		+ "/Geronimo/Saved/Config/Windows/GameUserSettings.ini")
-	print("same length +/- edit: orig=%d new=%d" % [orig.length(), txt.length()])
-	print("settings preserved: ", txt.contains("PlayerHeight=184") and txt.contains("[ScalabilityGroups]"))
+	var ak_row := "GunTransforms=%.6f,%.6f,%.6f|%.6f," % [14.52, n.offsets[ak]["lr"], n.offsets[ak]["fwd"], n.offsets[ak]["pitch"]]
+	var urgi_row := "GunTransforms=%.6f,%.6f,%.6f|%.6f," % [urgi_before["up"], urgi_before["lr"], urgi_before["fwd"], urgi_before["pitch"]]
+	print("edited row written: ", txt.contains(ak_row))
+	print("other row intact: ", txt.contains(urgi_row))
+	print("CRLF preserved: ", txt.contains("\r\n") == orig.contains("\r\n"))
+	print("row count unchanged: ", txt.count("GunTransforms=") == orig.count("GunTransforms="))
+	var ph := ""
+	for l in orig.split("\n"):
+		if l.strip_edges().begins_with("PlayerHeight="):
+			ph = l.strip_edges()
+	print("settings preserved: ", ph != "" and txt.contains(ph) and txt.contains("[ScalabilityGroups]"))
+	# NEW-GUN save: pick a gun not in the INI, save it, expect one extra row pair
+	var newgun: int = n.gun_in_ini.find(false)
+	if newgun != -1:
+		n.cur = newgun
+		n.offsets[newgun]["up"] = 9.99
+		n._save_ini()
+		var txt2 := FileAccess.get_file_as_string(scratch)
+		print("new gun appended: ", txt2.count("GunTransforms=") == orig.count("GunTransforms=") + 1
+			and txt2.count("GunClassPaths=") == orig.count("GunClassPaths=") + 1
+			and txt2.contains(n.gun_paths[newgun]))
+		print("class/transform counts match: ", txt2.count("GunTransforms=") == txt2.count("GunClassPaths="))
 	n.free()
 	quit()
