@@ -125,9 +125,15 @@ var pistol_body: Node3D
 
 var base_pos := Vector3(0.0, -0.02, 0.0)
 var base_pitch := 0.0
-# 0 = OFFSET (normal), 1 = BASE-ADJUST (anchor), 2 = TWO-HAND CAPTURE
+# 0 = OFFSET (normal), 1 = BASE-ADJUST, 2 = TWO-HAND CAPTURE, 3 = GLOBAL OFFSET
 var mode := 0
-const MODE_NAMES := ["OFFSET", "BASE-ADJUST", "TWO-HAND CAPTURE"]
+const MODE_NAMES := ["OFFSET", "BASE-ADJUST", "TWO-HAND CAPTURE", "GLOBAL OFFSET"]
+
+# Global controller offset (the "ExfilZone controller offset" equivalent): one
+# adjustment applied UNDER every gun's calibration. Stored in the tool's config;
+# INI rows are written as compose(global, per-gun) and decomposed on load, so
+# per-gun values stay clean. Adjust once, every gun (and its grab dot) follows.
+var glob := {"up": 0.0, "lr": 0.0, "fwd": 0.0, "pitch": 0.0}
 # rifle-local reference points for the two-hand solve (tunable to the game)
 const GRIP_PT := Vector3(0.0, -0.005, 0.01)
 const SOCKET_PT := Vector3(0.0, 0.05, -0.31)
@@ -615,13 +621,13 @@ func _load_ini() -> bool:
 			gun_names.append(_display_name(cls))
 			gun_paths.append(raw_paths[i])
 			gun_in_ini.append(true)
-			offsets.append(raw_offsets[i])
+			offsets.append(_decompose(glob, raw_offsets[i]))
 		else:
 			if _is_candidate_path(gun_paths[found]) and not _is_candidate_path(raw_paths[i]):
 				gun_paths[found] = raw_paths[i]   # game-written path wins
 			var o: Dictionary = raw_offsets[i]
 			if absf(o["up"]) > 0.005 or absf(o["lr"]) > 0.005:
-				offsets[found] = o                # calibrated values win
+				offsets[found] = _decompose(glob, o)   # calibrated values win
 	# seed for new guns: copy an existing calibrated gun (same stock => close
 	# start). Prefer the URGI row (typically the best-verified), else the first.
 	var seed_off := {"up": 0.0, "lr": 0.0, "fwd": 8.0, "pitch": 0.0}
@@ -772,7 +778,7 @@ func _game_running() -> bool:
 	return false
 
 
-func _save_ini() -> void:
+func _save_ini(include_cur := true) -> void:
 	if ini_path == "" or offsets.is_empty():
 		_flash("NOTHING LOADED - cannot save", 4.0, Color(1.0, 0.25, 0.2))
 		return
@@ -785,17 +791,17 @@ func _save_ini() -> void:
 	var txt := FileAccess.get_file_as_string(ini_path)
 	var lines := Array(txt.split("\n")).map(func(s): return String(s).trim_suffix("\r"))
 	# rebuild the calibration section from tool state: every gun already in the
-	# INI plus the one being saved now (keeps parallel arrays consistent and
-	# compacts any duplicate rows)
+	# INI plus (optionally) the one being saved now. Rows are written COMPOSED
+	# with the global controller offset.
 	var persist: Array[int] = []
 	for i in gun_names.size():
-		if gun_in_ini[i] or i == cur:
+		if gun_in_ini[i] or (include_cur and i == cur):
 			persist.append(i)
 	var section: Array = [CALIB_SECTION]
 	for i in persist:
 		section.append("GunClassPaths=" + gun_paths[i])
 	for i in persist:
-		var o: Dictionary = offsets[i]
+		var o: Dictionary = _compose(glob, offsets[i])
 		section.append("GunTransforms=%.6f,%.6f,%.6f|%.6f,0.000000,0.000000|1.000000,1.000000,1.000000" \
 			% [o["up"], o["lr"], o["fwd"], o["pitch"]])
 	var r := _extract_calib_section(lines)
@@ -820,9 +826,36 @@ func _save_ini() -> void:
 		return
 	f.store_string(joined)
 	f.close()
-	gun_in_ini[cur] = true
-	saved_vals[cur] = offsets[cur].duplicate()
-	_flash("SAVED  " + gun_names[cur], 3.0)
+	if include_cur:
+		gun_in_ini[cur] = true
+		saved_vals[cur] = offsets[cur].duplicate()
+		_flash("SAVED  " + gun_names[cur], 3.0)
+
+
+# ------------------------------------------------------- global offset compose
+func _compose(g: Dictionary, p: Dictionary) -> Dictionary:
+	# combined = global applied first, then per-gun (both in controller space)
+	var rot := Basis(Vector3.RIGHT, deg_to_rad(g["pitch"]))
+	var pv: Vector3 = rot * Vector3(p["lr"], p["up"], -p["fwd"])
+	return {
+		"lr": g["lr"] + pv.x,
+		"up": g["up"] + pv.y,
+		"fwd": g["fwd"] - pv.z,
+		"pitch": g["pitch"] + p["pitch"],
+	}
+
+
+func _decompose(g: Dictionary, c: Dictionary) -> Dictionary:
+	# inverse of _compose: recover per-gun from a combined INI row
+	var rot := Basis(Vector3.RIGHT, -deg_to_rad(g["pitch"]))
+	var dv := Vector3(c["lr"] - g["lr"], c["up"] - g["up"], -(c["fwd"] - g["fwd"]))
+	var pv: Vector3 = rot * dv
+	return {
+		"lr": pv.x,
+		"up": pv.y,
+		"fwd": -pv.z,
+		"pitch": c["pitch"] - g["pitch"],
+	}
 
 
 # ---------------------------------------------------------------- 2-hand capture
@@ -846,15 +879,14 @@ func _two_hand_capture() -> void:
 	var sv := SOCKET_PT - GRIP_PT
 	var model_elev := rad_to_deg(atan2(sv.y, Vector2(sv.x, sv.z).length()))
 	var total_pitch := line_elev - model_elev
-	var o: Dictionary = offsets[cur]
-	o["pitch"] = (total_pitch - base_pitch) / PITCH_SIGN
+	var cap_pitch := (total_pitch - base_pitch) / PITCH_SIGN
 	# translation: place the model's foregrip point exactly on the front controller
-	var rot := Basis(Vector3.RIGHT, deg_to_rad(base_pitch + PITCH_SIGN * o["pitch"]))
+	var rot := Basis(Vector3.RIGHT, deg_to_rad(base_pitch + PITCH_SIGN * cap_pitch))
 	var pos := f_local - rot * SOCKET_PT          # rifle origin in controller space
 	var t := (pos - base_pos) * 100.0             # metres -> cm
-	o["lr"] = t.x
-	o["up"] = t.y
-	o["fwd"] = -t.z
+	# capture computes the COMBINED pose; store the per-gun part under the global
+	offsets[cur] = _decompose(glob,
+		{"lr": t.x, "up": t.y, "fwd": -t.z, "pitch": cap_pitch})
 	mode = 0
 	_flash("CAPTURED %s - review, then save" % gun_names[cur], 3.5)
 
@@ -865,6 +897,16 @@ func _load_base_pose() -> void:
 	if cfg.load(BASE_CFG) == OK:
 		base_pos = cfg.get_value("base", "pos", base_pos)
 		base_pitch = cfg.get_value("base", "pitch", base_pitch)
+		for k in glob:
+			glob[k] = float(cfg.get_value("global", k, 0.0))
+
+
+func _save_global() -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(BASE_CFG)
+	for k in glob:
+		cfg.set_value("global", k, glob[k])
+	cfg.save(BASE_CFG)
 
 
 func _save_base_pose() -> void:
@@ -928,10 +970,12 @@ func _on_offhand_button(bname: String) -> void:
 	if restore_mode:
 		return
 	if bname == "ax_button":
-		mode = (mode + 1) % 3
+		mode = (mode + 1) % 4
 		var msg: String = "MODE: " + MODE_NAMES[mode]
 		if mode == 2:
 			msg += " - hold stock 2-handed, pull both triggers"
+		elif mode == 3:
+			msg += " - adjusts ALL guns; triggers save + rewrite"
 		_flash(msg, 2.5, Color(1.0, 0.8, 0.2))
 	elif bname == "by_button":
 		if not offsets.is_empty():
@@ -983,6 +1027,11 @@ func _process(delta: float) -> void:
 		base_pitch += prs.x * PITCH_DPS * speed * delta
 	elif mode == 2:
 		pass                                   # capture mode: sticks disabled
+	elif mode == 3:
+		glob["lr"] += offs.x * MOVE_CMPS * speed * delta
+		glob["up"] += offs.y * MOVE_CMPS * speed * delta
+		glob["fwd"] += prs.y * MOVE_CMPS * speed * delta
+		glob["pitch"] += prs.x * PITCH_DPS * speed * delta
 	elif not offsets.is_empty():
 		var o: Dictionary = offsets[cur]
 		o["lr"] += offs.x * MOVE_CMPS * speed * delta
@@ -990,9 +1039,9 @@ func _process(delta: float) -> void:
 		o["fwd"] += prs.y * MOVE_CMPS * speed * delta
 		o["pitch"] += prs.x * PITCH_DPS * speed * delta
 
-	# apply pose: INI [up, lr, fwd] cm -> Godot metres (X right, Y up, -Z fwd)
+	# apply pose: combined = global under per-gun; INI cm -> Godot metres
 	if not offsets.is_empty():
-		var o2: Dictionary = offsets[cur]
+		var o2: Dictionary = _compose(glob, offsets[cur])
 		rifle.position = base_pos + Vector3(o2["lr"], o2["up"], -o2["fwd"]) * 0.01
 		rifle.rotation_degrees = Vector3(base_pitch + PITCH_SIGN * o2["pitch"], 0.0, 0.0)
 
@@ -1018,6 +1067,10 @@ func _process(delta: float) -> void:
 				_save_base_pose()
 			elif mode == 2:
 				_two_hand_capture()
+			elif mode == 3:
+				_save_global()
+				_save_ini(false)
+				_flash("GLOBAL OFFSET SAVED - all calibrated guns rewritten", 3.5)
 			else:
 				_save_ini()
 	elif lt < TRIG_OFF and rt < TRIG_OFF:
@@ -1064,6 +1117,9 @@ func _update_hud() -> void:
 		status_line = "TWO-HAND CAPTURE: hold naturally, pull both triggers"
 	elif mode == 1:
 		status_line = "MODE: BASE-ADJUST"
+	elif mode == 3:
+		status_line = "GLOBAL (all guns): up %+.1f lr %+.1f fwd %+.1f pitch %+.1f" \
+			% [glob["up"], glob["lr"], glob["fwd"], glob["pitch"]]
 	elif not gun_in_ini[cur]:
 		status_line = "NEW - not in game save yet" \
 			+ (" (path unverified)" if _is_candidate_path(gun_paths[cur]) else "")

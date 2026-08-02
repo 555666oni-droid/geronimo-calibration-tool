@@ -70,7 +70,8 @@ CONTROLS  (as right-handed; mirrored automatically for lefties)
                       Pistols: irons / slide dot (SRO).
   LEFT STICK CLICK  : backup RESTORE menu (stick up/down = select,
                       RIGHT A = restore, RIGHT B = cancel)
-  LEFT X       : cycle mode - OFFSET / BASE-ADJUST / TWO-HAND CAPTURE
+  LEFT X       : cycle mode - OFFSET / BASE-ADJUST / TWO-HAND CAPTURE /
+                 GLOBAL OFFSET
   LEFT Y       : revert current gun to last saved values
   BOTH TRIGGERS: SAVE (in OFFSET mode) / capture (in TWO-HAND CAPTURE mode)
 
@@ -94,6 +95,25 @@ Every launch, the tool snapshots your INI into:
 (newest 30 kept). The RESTORE menu (left stick click) splices a backup's
 CALIBRATION SECTION back into your current file - your graphics/audio settings
 are never touched by a restore. Experiment freely; you can always walk it back.
+
+GLOBAL CONTROLLER OFFSET (all guns at once)
+-------------------------------------------
+If EVERY gun feels wrong in the same way (common complaint: the default
+controller angle/tilt doesn't suit your grip or headset - e.g. Quest 3), you
+don't have to fix each gun separately. GLOBAL OFFSET mode is one adjustment
+applied UNDER all per-gun calibrations - the equivalent of the "controller
+offset" setting some other VR shooters have, done externally.
+
+LEFT X until "GLOBAL OFFSET": the sticks now move ALL guns together (same
+stick mapping as normal). Pull both triggers to save - the tool stores the
+global offset in its own config and rewrites every calibrated gun's INI row
+with it composed in. Per-gun calibrations stay clean underneath: you can
+still fine-tune any single gun afterwards in OFFSET mode.
+
+Limits (honesty dept.): this moves held guns and their grab points. It cannot
+move empty-hand poses or menus (that would need a system-level OpenXR shim),
+and while both hands grip the gun the game's two-hand aim overrides rotation -
+use TWO-HAND CAPTURE to make that consistent.
 
 TWO-HANDED ALIGNMENT (the cyan + orange lines)
 ----------------------------------------------

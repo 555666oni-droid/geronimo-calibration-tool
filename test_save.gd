@@ -4,6 +4,15 @@ func _init() -> void:
 	var n := Node3D.new()
 	n.set_script(load("res://main.gd"))
 	assert(n._load_ini())
+	# global-offset compose/decompose round-trip
+	var g := {"up": 3.0, "lr": -2.0, "fwd": 5.0, "pitch": 10.0}
+	var p := {"up": 13.0, "lr": -0.9, "fwd": 4.2, "pitch": -16.5}
+	var rt: Dictionary = n._decompose(g, n._compose(g, p))
+	var rt_ok := true
+	for k in p:
+		if absf(rt[k] - p[k]) > 0.0001:
+			rt_ok = false
+	print("compose roundtrip: ", rt_ok)
 	var ini_gun_count := 0
 	for b in n.gun_in_ini:
 		if b:
